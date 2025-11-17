@@ -2,7 +2,7 @@
 # =====================================================
 #  PREMIUMSSH PRO - SSH PREMIUM AUTOSCRIPT
 #  Ubuntu 20.04 / 22.04
-#  Menu graphique + multi-services
+#  Menu graphique + HTTP custom SSH
 # =====================================================
 
 # Colors
@@ -18,7 +18,7 @@ echo -e "         PREMIUM SSH PRO AUTO-INSTALLER"
 echo -e "===============================================${NC}"
 
 # ---------------------------
-# UPDATE & INSTALL BASICS
+# INSTALL DEPENDENCIES
 # ---------------------------
 apt update && apt upgrade -y
 apt install -y curl wget jq screen net-tools \
@@ -26,14 +26,14 @@ dropbear stunnel4 openvpn nginx python3 python3-pip \
 fail2ban ufw socat bzip2 dialog
 
 # ---------------------------
-# CONFIG SSH (PORT 22)
+# SSH PORT 22 CONFIG
 # ---------------------------
 sed -i 's/#Port 22/Port 22/' /etc/ssh/sshd_config
 sed -i 's/PasswordAuthentication no/PasswordAuthentication yes/' /etc/ssh/sshd_config
 systemctl restart ssh
 
 # ---------------------------
-# DROPBEAR CONFIG (80 / 443)
+# DROPBEAR CONFIG DEFAULT 443/80
 # ---------------------------
 cat >/etc/default/dropbear <<EOF
 NO_START=0
@@ -45,16 +45,17 @@ echo "Premium SSH Server PRO" >/etc/issue.net
 systemctl restart dropbear
 
 # ---------------------------
-# BADVPN INSTALL
+# BADVPN
 # ---------------------------
 wget -O /usr/bin/badvpn "https://raw.githubusercontent.com/nkinmo/VPS-Autoscript/main/badvpn"
 chmod +x /usr/bin/badvpn
 screen -dmS badvpn badvpn --listen-addr 127.0.0.1:7300 --max-clients 500
 
 # ---------------------------
-# NGINX + WEBSOCKET
+# NGINX DEFAULT + WEBSOCKET
 # ---------------------------
 rm -f /etc/nginx/sites-enabled/default
+
 cat >/etc/nginx/sites-enabled/premium.conf <<EOF
 server {
     listen 80;
@@ -69,10 +70,11 @@ server {
     }
 }
 EOF
+
 systemctl restart nginx
 
 # ---------------------------
-# STUNNEL SSL (443)
+# STUNNEL SSL 443
 # ---------------------------
 mkdir -p /etc/stunnel
 openssl req -new -x509 -days 1095 -nodes -subj "/CN=PremiumSSH PRO" \
@@ -89,7 +91,7 @@ sed -i 's/ENABLED=0/ENABLED=1/' /etc/default/stunnel4
 systemctl restart stunnel4
 
 # ---------------------------
-# SLOWDNS (DNSTT)
+# SLOWDNS
 # ---------------------------
 wget -O /usr/bin/dnstt-server "https://raw.githubusercontent.com/nkinmo/VPS-Autoscript/main/dnstt-server"
 wget -O /usr/bin/dnstt-client "https://raw.githubusercontent.com/nkinmo/VPS-Autoscript/main/dnstt-client"
@@ -108,12 +110,39 @@ ufw --force enable
 systemctl restart fail2ban
 
 # ---------------------------
-# PREMIUMSSH PRO MENU (GRAPHIC)
+# FUNCTION: CONFIGURE HTTP CUSTOM SSH
+# ---------------------------
+configure_http_ssh() {
+    dialog --title "HTTP Custom SSH" --inputbox "Enter HTTP custom port:" 8 40 2> /tmp/http_port
+    PORT=$(cat /tmp/http_port)
+
+    sed -i "s/DROPBEAR_PORT=.*/DROPBEAR_PORT=$PORT/" /etc/default/dropbear
+    systemctl restart dropbear
+
+    cat >/etc/nginx/sites-enabled/ssh-http.conf <<EOF
+server {
+    listen $PORT;
+    server_name _;
+    location /ssh {
+        proxy_pass http://127.0.0.1:22;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host \$host;
+    }
+}
+EOF
+    nginx -t && systemctl restart nginx
+    dialog --msgbox "SSH HTTP custom setup completed on port $PORT" 6 40
+}
+
+# ---------------------------
+# PREMIUMSSH PRO MENU
 # ---------------------------
 while true; do
 CHOICE=$(dialog --clear --backtitle "PremiumSSH PRO Menu" \
 --title "MAIN MENU" \
---menu "Choose an option:" 15 50 8 \
+--menu "Choose an option:" 15 50 9 \
 1 "Create User" \
 2 "Delete User" \
 3 "List Users" \
@@ -121,6 +150,7 @@ CHOICE=$(dialog --clear --backtitle "PremiumSSH PRO Menu" \
 5 "Active Connections" \
 6 "Restart Services" \
 7 "Install / Update Services" \
+8 "Configure SSH HTTP Custom" \
 0 "Exit" 3>&1 1>&2 2>&3)
 
 case $CHOICE in
@@ -159,6 +189,9 @@ case $CHOICE in
     ;;
 7)
     dialog --msgbox "All services are up to date!" 6 40
+    ;;
+8)
+    configure_http_ssh
     ;;
 0)
     clear
