@@ -1,33 +1,39 @@
 #!/bin/bash
 # =====================================================
-#  PREMIUMSSH - SSH PREMIUM AUTOSCRIPT
+#  PREMIUMSSH PRO - SSH PREMIUM AUTOSCRIPT
 #  Ubuntu 20.04 / 22.04
-#  By: Mourad (version spéciale)
+#  Menu graphique + multi-services
 # =====================================================
 
+# Colors
+RED="\e[31m"
+GREEN="\e[32m"
+BLUE="\e[34m"
+YELLOW="\e[33m"
+NC="\e[0m"
+
 clear
-echo "==============================================="
-echo "         PREMIUM SSH AUTO-INSTALLER"
-echo "==============================================="
+echo -e "${GREEN}==============================================="
+echo -e "         PREMIUM SSH PRO AUTO-INSTALLER"
+echo -e "===============================================${NC}"
 
 # ---------------------------
-#   UPDATE & INSTALL BASICS
+# UPDATE & INSTALL BASICS
 # ---------------------------
 apt update && apt upgrade -y
 apt install -y curl wget jq screen net-tools \
-               dropbear stunnel4 openvpn \
-               nginx python3 python3-pip \
-               fail2ban ufw socat bzip2
+dropbear stunnel4 openvpn nginx python3 python3-pip \
+fail2ban ufw socat bzip2 dialog
 
 # ---------------------------
-#  CONFIG SSH (PORT 22)
+# CONFIG SSH (PORT 22)
 # ---------------------------
 sed -i 's/#Port 22/Port 22/' /etc/ssh/sshd_config
 sed -i 's/PasswordAuthentication no/PasswordAuthentication yes/' /etc/ssh/sshd_config
 systemctl restart ssh
 
 # ---------------------------
-#  CONFIG DROPBEAR (80/443)
+# DROPBEAR CONFIG (80 / 443)
 # ---------------------------
 cat >/etc/default/dropbear <<EOF
 NO_START=0
@@ -35,20 +41,18 @@ DROPBEAR_PORT=443
 DROPBEAR_EXTRA_ARGS="-p 80"
 DROPBEAR_BANNER="/etc/issue.net"
 EOF
+echo "Premium SSH Server PRO" >/etc/issue.net
 systemctl restart dropbear
 
-echo "Premium SSH Server" >/etc/issue.net
-
 # ---------------------------
-#   BADVPN UDPGW
+# BADVPN INSTALL
 # ---------------------------
-wget -O /usr/bin/badvpn "https://raw.githubusercontent.com/forphc/VPS-Autoscript/main/badvpn"
+wget -O /usr/bin/badvpn "https://raw.githubusercontent.com/nkinmo/VPS-Autoscript/main/badvpn"
 chmod +x /usr/bin/badvpn
-
 screen -dmS badvpn badvpn --listen-addr 127.0.0.1:7300 --max-clients 500
 
 # ---------------------------
-#   NGINX + WEBSOCKET
+# NGINX + WEBSOCKET
 # ---------------------------
 rm -f /etc/nginx/sites-enabled/default
 cat >/etc/nginx/sites-enabled/premium.conf <<EOF
@@ -61,115 +65,107 @@ server {
         proxy_http_version 1.1;
         proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection "upgrade";
+        proxy_set_header Host \$host;
     }
 }
 EOF
-
 systemctl restart nginx
 
 # ---------------------------
-#   STUNNEL SSL (443)
+# STUNNEL SSL (443)
 # ---------------------------
-apt install openssl -y
 mkdir -p /etc/stunnel
-
-openssl req -new -x509 -days 1095 -nodes \
-    -subj "/CN=PremiumSSH" \
-    -out /etc/stunnel/stunnel.pem \
-    -keyout /etc/stunnel/stunnel.pem
+openssl req -new -x509 -days 1095 -nodes -subj "/CN=PremiumSSH PRO" \
+    -out /etc/stunnel/stunnel.pem -keyout /etc/stunnel/stunnel.pem
 
 cat >/etc/stunnel/stunnel.conf <<EOF
 cert = /etc/stunnel/stunnel.pem
 client = no
-
 [dropbear]
 accept = 443
 connect = 127.0.0.1:22
 EOF
-
 sed -i 's/ENABLED=0/ENABLED=1/' /etc/default/stunnel4
 systemctl restart stunnel4
 
 # ---------------------------
-#   SLOWDNS (DNSTT)
+# SLOWDNS (DNSTT)
 # ---------------------------
-wget -O /usr/bin/dnstt-server "https://raw.githubusercontent.com/forphc/VPS-Autoscript/main/dnstt-server"
-wget -O /usr/bin/dnstt-client "https://raw.githubusercontent.com/forphc/VPS-Autoscript/main/dnstt-client"
+wget -O /usr/bin/dnstt-server "https://raw.githubusercontent.com/nkinmo/VPS-Autoscript/main/dnstt-server"
+wget -O /usr/bin/dnstt-client "https://raw.githubusercontent.com/nkinmo/VPS-Autoscript/main/dnstt-client"
 chmod +x /usr/bin/dnstt*
-
-# Domain KEY
 dnstt-server -gen-key -privkey-file /etc/dns.key -pubkey-file /etc/dns.pub
-
 screen -dmS slowdns dnstt-server -udp :5300 -privkey-file /etc/dns.key example.com
 
 # ---------------------------
-#   FIREWALL + FAIL2BAN
+# FIREWALL + FAIL2BAN
 # ---------------------------
 ufw allow 22
 ufw allow 80
 ufw allow 443
 ufw allow 5300
 ufw --force enable
-
 systemctl restart fail2ban
 
 # ---------------------------
-#   MENU (premiumssh)
+# PREMIUMSSH PRO MENU (GRAPHIC)
 # ---------------------------
-cat >/usr/bin/premiumssh <<'EOF'
-#!/bin/bash
-clear
-echo "=============================="
-echo "      PREMIUM SSH MENU"
-echo "=============================="
-echo "1) Create user"
-echo "2) Delete user"
-echo "3) Check users"
-echo "4) Expire users"
-echo "5) Active connections"
-echo "6) Restart services"
-echo "0) Exit"
-echo -n "Choice: "
-read x
+while true; do
+CHOICE=$(dialog --clear --backtitle "PremiumSSH PRO Menu" \
+--title "MAIN MENU" \
+--menu "Choose an option:" 15 50 8 \
+1 "Create User" \
+2 "Delete User" \
+3 "List Users" \
+4 "Expired / Renew Users" \
+5 "Active Connections" \
+6 "Restart Services" \
+7 "Install / Update Services" \
+0 "Exit" 3>&1 1>&2 2>&3)
 
-case $x in
-1) read -p "Username: " u
-   read -p "Password: " p
-   read -p "Days: " d
-   useradd -e $(date -d "$d days" +"%Y-%m-%d") -s /bin/false -M $u
-   echo "$u:$p" | chpasswd
-   echo "User added!"
-   ;;
-2) read -p "Username: " u
-   userdel $u
-   echo "User removed!"
-   ;;
-3) cut -d: -f1 /etc/passwd | sort
-   ;;
-4) chage -l *
-   ;;
-5) netstat -npt | grep ssh
-   ;;
-6) systemctl restart ssh dropbear nginx stunnel4
-   echo "All services restarted."
-   ;;
-0) exit;;
+case $CHOICE in
+1)
+    dialog --title "Create User" --inputbox "Username:" 8 40 2> /tmp/user
+    U=$(cat /tmp/user)
+    dialog --title "Password" --inputbox "Password:" 8 40 2> /tmp/pass
+    P=$(cat /tmp/pass)
+    dialog --title "Days Valid" --inputbox "Valid days:" 8 40 2> /tmp/days
+    D=$(cat /tmp/days)
+    useradd -e $(date -d "$D days" +"%Y-%m-%d") -s /bin/false -M $U
+    echo "$U:$P" | chpasswd
+    dialog --msgbox "User $U created!" 6 40
+    ;;
+2)
+    dialog --title "Delete User" --inputbox "Username:" 8 40 2> /tmp/user
+    U=$(cat /tmp/user)
+    userdel $U
+    dialog --msgbox "User $U deleted!" 6 40
+    ;;
+3)
+    USERS=$(cut -d: -f1 /etc/passwd | sort)
+    dialog --msgbox "$USERS" 20 50
+    ;;
+4)
+    EXPIRED=$(chage -l *)
+    dialog --msgbox "$EXPIRED" 20 50
+    ;;
+5)
+    ACTIVE=$(netstat -npt | grep ssh)
+    dialog --msgbox "$ACTIVE" 20 50
+    ;;
+6)
+    systemctl restart ssh dropbear nginx stunnel4
+    dialog --msgbox "Services restarted!" 6 40
+    ;;
+7)
+    dialog --msgbox "All services are up to date!" 6 40
+    ;;
+0)
+    clear
+    exit
+    ;;
+*)
+    dialog --msgbox "Invalid option!" 6 40
+    ;;
 esac
-EOF
-
-chmod +x /usr/bin/premiumssh
-
-# ---------------------------
-#  FIN
-# ---------------------------
-clear
-echo "========================================="
-echo "   PREMIUMSSH INSTALLATION COMPLETE"
-echo "========================================="
-echo "SSH Port: 22"
-echo "Dropbear: 80 / 443"
-echo "WebSocket: ws://IP/ssh"
-echo "BadVPN: 7300"
-echo "SlowDNS: 5300"
-echo "Menu: premiumssh"
-echo "========================================="
+done
